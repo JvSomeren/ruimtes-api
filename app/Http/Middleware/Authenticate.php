@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use Closure;
+use App\Admin;
+use App\Session;
 use Illuminate\Contracts\Auth\Factory as Auth;
 
 class Authenticate
@@ -13,6 +15,11 @@ class Authenticate
      * @var \Illuminate\Contracts\Auth\Factory
      */
     protected $auth;
+
+    private function convert_epoch_to_datetime($epoch)
+    {
+        return date('Y-m-d H:i:s', substr($epoch, 0, 10));
+    }
 
     /**
      * Create a new middleware instance.
@@ -33,10 +40,32 @@ class Authenticate
      * @param  string|null  $guard
      * @return mixed
      */
-    public function handle($request, Closure $next, $guard = null)
+    public function handle($request, Closure $next, $role = null)
     {
-        if ($this->auth->guard($guard)->guest()) {
-            return response('Unauthorized.', 401);
+        if($role == "user" || $role == "admin")
+        {
+            if($request->header('Authorization')) {
+                $header = explode(':', $request->header('Authorization'));
+                $time = $this->convert_epoch_to_datetime(time());
+    
+                $session = Session::where('uid', $header[0])
+                    ->where('hash', $header[1])
+                    ->whereDate('expires', '>', $time)
+                    ->first();
+    
+                if(!empty($session)) {
+                    if($role == "admin") {
+                        $admin = Admin::where('uid', $header[0])->first();
+
+                        if(empty($admin))
+                            return response()->json(['msg' => 'Invalide rechten'], 401);
+                    }
+
+                    return $next($request);
+                }
+            }
+    
+            return response()->json(['msg' => 'Invalide sessie'], 401);
         }
 
         return $next($request);
