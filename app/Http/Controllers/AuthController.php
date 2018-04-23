@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Admin;
 use App\Auth;
 use App\Session;
+use App\Http\Resources\AuthResource;
 use Genkgo\Api\Connection;
 use GuzzleHttp\Client;
 use Illuminate\Http\Request;
@@ -73,12 +74,12 @@ class AuthController extends Controller
 
     private function add_admin($uid)
     {
-        Admin::firstOrCreate(['uid' => $uid]);
+        return Admin::firstOrCreate(['uid' => $uid]);
     }
 
-    private function delete_admin($uid)
+    private function delete_admin($id)
     {
-        Admin::where('uid', $uid)->delete();
+        Admin::where('id', $id)->delete();
     }
 
     private function is_admin($uid)
@@ -111,12 +112,12 @@ class AuthController extends Controller
         {
             $time = $this->convert_epoch_to_datetime(time());
 
-            Session::where('uid', $uid)
-                ->where('hash', $hash)
-                ->whereDate('expires', '>', $time)
-                ->firstOrFail();
+            $session = Session::where('uid', $uid)
+                    ->where('hash', $hash)
+                    ->whereDate('expires', '>', $time)
+                    ->firstOrFail();
 
-            return true;
+            return $session;
         } catch(ModelNotFoundException $e)
         {
             return false;
@@ -126,69 +127,46 @@ class AuthController extends Controller
     public function addAdmin(Request $request)
     {
         $this->validate($request, [
-            'uid'       => 'required',
-            'hash'      => 'required',
-            'adminUid'  => 'required'
+            'uid'       => 'required'
         ]);
 
-        if($this->validate_session($request->uid, $request->hash) &&
-            $this->is_admin($request->uid))
-        {
-            $this->add_admin($request->adminUid);
+        $admin = $this->add_admin($request->uid);
 
-            return response()->json([
-                'msg' => 'Beheerder toegevoegd',
-                'body' => $request->adminUid
-            ], 200);
-        } else
-        {
-            return response()->json(['msg' => 'Missende rechten'], 401);
-        }
+        return response()->json($admin, 200);
+    }
+
+    public function updateAdmin($id, Request $request)
+    {
+        $admin = Admin::findOrFail($id);
+        $admin->update($request->all());
+
+        return response()->json($admin, 200);
     }
 
     public function clearSessions(Request $request)
     {
-        $this->validate($request, [
-            'uid'       => 'required',
-            'hash'      => 'required',
-        ]);
+        $time = $this->convert_epoch_to_datetime(time()-1);
 
-        if($this->validate_session($request->uid, $request->hash))
-        {
-            $time = $this->convert_epoch_to_datetime(time()-1);
+        Session::where('uid', $request->uid)
+            ->whereDate('expires', '>', $time)
+            ->update(['expires' => $time]);
 
-            Session::where('uid', $request->uid)
-                ->whereDate('expires', '>', $time)
-                ->update(['expires' => $time]);
-
-            return response()->json(['msg' => 'Sessions cleared'], 200);
-        } else
-        {
-            return response()->json(['msg' => 'Invalide sessie'], 401);
-        }
+        return response()->json(['msg' => 'Sessions cleared'], 200);
     }
 
-    public function deleteAdmin(Request $request)
+    public function deleteAdmin($id, Request $request)
     {
-        $this->validate($request, [
-            'uid'       => 'required',
-            'hash'      => 'required',
-            'adminUid'  => 'required'
-        ]);
+        $this->delete_admin($id);
 
-        if($this->validate_session($request->uid, $request->hash) &&
-            $this->is_admin($request->uid))
-        {
-            $this->delete_admin($request->adminUid);
+        return response()->json([
+            'msg' => 'Beheerder verwijderd',
+            'body' => $id
+        ], 200);
+    }
 
-            return response()->json([
-                'msg' => 'Beheerder verwijderd',
-                'body' => $request->adminUid
-            ], 200);
-        } else
-        {
-            return response()->json(['msg' => 'Missende rechten'], 401);
-        }
+    public function getAllAdmins(Request $request)
+    {
+        return response()->json(Admin::all(), 200);
     }
 
     public function isAdmin(Request $request)
@@ -292,9 +270,11 @@ class AuthController extends Controller
             'hash'      => 'required',
         ]);
 
-        if($this->validate_session($request->uid, $request->hash))
+        $session = $this->validate_session($request->uid, $request->hash);
+
+        if($session)
         {
-            return response()->json(['msg' => 'Valide cookies'], 200);
+            return response()->json(new AuthResource($session), 200);
         } else
         {
             return response()->json(['msg' => 'Invalide sessie'], 401);
